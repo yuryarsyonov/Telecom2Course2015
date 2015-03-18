@@ -9,7 +9,7 @@ HTTP (Web-сервера). Сервер должен быть написан н�
 
 Пример запроса:
 
-    GET / HTTP/1.1
+    GET /file.html HTTP/1.1
     User-Agent: curl/7.38.0
     Host: MySite
     Accept: */*
@@ -53,10 +53,10 @@ URL должен указывать на реально существующий
 Пример ответа:
 
     HTTP/1.1 200 OK
-    Server: nginx/1.4.4
+    Server: YuryServer
     Date: Wed, 18 Mar 2015 09:21:52 GMT
-    Content-Type: text/html; charset=utf-8
-    Connection: keep-alive
+    Content-Type: text/html
+    Connection: close
 
 * POST – для получения от клиента параметров Web-форм.
 
