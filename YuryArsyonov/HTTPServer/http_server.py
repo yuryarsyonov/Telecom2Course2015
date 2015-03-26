@@ -30,7 +30,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                request.startswith("HEAD ")
 
         if request.startswith("POST "):
-            fetch_post_params(sock)
+            fetch_post_params(conn)
 
         req_path = request.splitlines()[0]
         req_path = req_path.partition(' ')[2]
