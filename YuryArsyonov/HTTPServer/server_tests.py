@@ -1,14 +1,19 @@
 import mimetypes
-import socketserver
-from nose import with_setup
+import multiprocessing
+import time
+
+from nose.tools import assert_equal, raises
+
 from YuryArsyonov.HTTPServer.http_server import start_server
-import multiprocessing, time
-from nose.tools import assert_equal
+
 
 __author__ = 'yuryarsyonov'
 import requests
 
 class TestServer:
+    correct_url = 'http://localhost:8080/mc.yandex.ru/robots.txt'
+    non_found_url = 'http://localhost:8080/non/existing/file'
+
     @classmethod
     def setup_class(self):
         mimetypes.init()
@@ -21,14 +26,27 @@ class TestServer:
 
     @classmethod
     def teardown_class(self):
-        self.server.shutdown()
+        # self.server.shutdown()
         self.t1.terminate()
 
     def test_simple_get(self):
-        r = requests.get('http://localhost:8080/mc.yandex.ru/robots.txt')
+        r = requests.get(self.correct_url)
         assert_equal(r.status_code, 200)
         assert_equal(r.text, "User-Agent: *\nDisallow: /\n")
 
     def test_file_not_found(self):
-        r = requests.get('http://localhost:8080/non/existing/file')
+        r = requests.get(self.non_found_url)
         assert_equal(r.status_code, 404)
+
+    def test_head_request(self):
+        r = requests.head(self.correct_url)
+        assert_equal(r.status_code, 200)
+
+    def test_post_request(self):
+        r = requests.post(self.correct_url, data="key=value&abc=abc")
+        assert_equal(r.status_code, 200)
+        assert_equal(r.text, 'key is value\nabc is abc\n')
+
+    def test_unknown_method(self):
+        r = requests.put(self.correct_url)
+        assert_equal(r.status_code, 500)

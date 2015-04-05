@@ -6,22 +6,27 @@ import logging
 
 __author__ = 'yuryarsyonov'
 
-def header_send(conn, line, value):
-    conn.sendall("{}: {}\r\n".format(line, value).encode('UTF-8'))
-
 def start_server():
-    HOST, PORT = "localhost", 8081
+    HOST, PORT = "localhost", 8080
 
     # Create the server, binding to localhost on port 9999
-    server = socketserver.TCPServer((HOST, PORT), MyTCPHandler)
+    server = socketserver.TCPServer((HOST, PORT), MyTCPHandler, False)
     server.allow_reuse_address = True
+    server.server_bind()
+    server.server_activate()
     return server
 
 class HTTPServer(object):
     root = "/home/yuryarsyonov/site/"
     error_msg = "No such file\r\n".encode('UTF-8')
 
-    def fetch_post_params(self, conn, request):
+    def __init__(self):
+        self.conn = None
+
+    def header_send(self, line, value):
+        self.conn.sendall("{}: {}\r\n".format(line, value).encode('UTF-8'))
+
+    def fetch_post_params(self, request):
         payload_length = -1
         headers = request.splitlines()[1:]
         for header in headers:
@@ -32,16 +37,20 @@ class HTTPServer(object):
         assert payload_length >= 0
         payload = request.partition('\r\n\r\n')[2]
         while len(payload) < payload_length:
-            new_val = conn.recv(1024).decode()
+            new_val = self.conn.recv(1024).decode()
             payload += new_val
+        response = ""
         for x in payload.split('&'):
-            print(x)
+            key, equal, value = x.partition('=')
+            response += (key + " is " + value + "\n")
+        logging.info(response)
+        return response
 
-    def fetch_request(self, conn):
+    def fetch_request(self,):
         raw_request = bytearray()
 
         while b'\r\n\r\n' not in raw_request:
-            data = conn.recv(1024)
+            data = self.conn.recv(1024)
             logging.info("Received " + data.decode('UTF-8'))
             raw_request += data
 
@@ -54,19 +63,37 @@ class HTTPServer(object):
 
         return urllib.parse.unquote(req_path)
 
+    def send_response(self, code, message, body,
+                      content_type="text/plain", content_encoding=None, send_body=True):
+        self.conn.send("HTTP/1.1 {} {}\r\n".format(code, message).encode())
+        self.header_send("Server", "YuryServer")
+        self.header_send("Connection", "close")
+        if content_type is not None:
+            self.header_send("Content-Type", content_type)
+        if content_encoding is not None:
+            self.header_send("Content-Encoding", content_encoding)
+
+        self.header_send("Content-Length", str(len(body)))
+        self.conn.send(b"\r\n")
+        if send_body:
+            self.conn.send(body)
+
 class MyTCPHandler(socketserver.BaseRequestHandler, HTTPServer):
     def handle(self):
-        conn = self.request
+        self.conn = self.request
 
-        request = self.fetch_request(conn)
+        request = self.fetch_request()
         logging.info("Request is: \n" + request)
 
-        assert request.startswith("GET ") or \
-               request.startswith("POST ") or \
-               request.startswith("HEAD ")
+        if not (request.startswith("GET ") or
+                request.startswith("POST ") or
+                request.startswith("HEAD ")):
+            self.send_response(500, "Internal Server Error", "".encode())
+            return
 
         if request.startswith("POST "):
-            self.fetch_post_params(conn, request)
+            response = self.fetch_post_params(request)
+            self.send_response(200, "OK", response.encode())
 
         req_path = self.get_path(request)
 
@@ -77,29 +104,18 @@ class MyTCPHandler(socketserver.BaseRequestHandler, HTTPServer):
         if not file_exists and file_path.endswith('/'):
             file_path += 'index.html'
             file_exists = os.path.isfile(file_path)
-        if file_exists:
-            conn.send(b"HTTP/1.1 200 OK\r\n")
-        else:
-            conn.send(b"HTTP/1.1 404 Not Found\r\n")
-        header_send(conn, "Server", "YuryServer")
-        header_send(conn, "Connection", "close")
+
         if file_exists:
             (file_type, encoding) = mimetypes.guess_type(file_path)
-            if file_type is not None:
-                header_send(conn, "Content-Type", file_type)
-            if encoding is not None:
-                header_send(conn, "Content-Encoding", encoding)
-
             file_content = open(file_path, mode='rb').read()
-            header_send(conn, "Content-Length", str(len(file_content)))
-            conn.send(b"\r\n")
-            conn.send(file_content)
+
+            self.send_response(200, "OK", file_content, content_type=file_type,
+                               content_encoding=encoding,
+                               send_body=not request.startswith("HEAD "))
         else:
-            header_send(conn, "Content-Type", "text/plain")
-            header_send(conn, "Content-Length", str(len(self.error_msg)))
-            conn.send(b"\r\n")
-            conn.send(self.error_msg)
-        conn.close()
+            self.send_response(404, "Not Found", self.error_msg)
+
+        self.conn.close()
 
 if __name__ == "__main__":
     mimetypes.init()
