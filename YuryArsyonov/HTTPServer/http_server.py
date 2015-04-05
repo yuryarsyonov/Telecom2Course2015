@@ -10,7 +10,7 @@ def header_send(conn, line, value):
     conn.sendall("{}: {}\r\n".format(line, value).encode('UTF-8'))
 
 def start_server():
-    HOST, PORT = "localhost", 8080
+    HOST, PORT = "localhost", 8081
 
     # Create the server, binding to localhost on port 9999
     server = socketserver.TCPServer((HOST, PORT), MyTCPHandler)
@@ -21,8 +21,21 @@ class HTTPServer(object):
     root = "/home/yuryarsyonov/site/"
     error_msg = "No such file\r\n".encode('UTF-8')
 
-    def fetch_post_params(self, conn):
-        pass
+    def fetch_post_params(self, conn, request):
+        payload_length = -1
+        headers = request.splitlines()[1:]
+        for header in headers:
+            if header.startswith("Content-Length"):
+                value = header.partition("Content-Length:")[2]
+                value = value.strip()
+                payload_length = int(value)
+        assert payload_length >= 0
+        payload = request.partition('\r\n\r\n')[2]
+        while len(payload) < payload_length:
+            new_val = conn.recv(1024).decode()
+            payload += new_val
+        for x in payload.split('&'):
+            print(x)
 
     def fetch_request(self, conn):
         raw_request = bytearray()
@@ -32,7 +45,7 @@ class HTTPServer(object):
             logging.info("Received " + data.decode('UTF-8'))
             raw_request += data
 
-        return raw_request.decode("utf-8")
+        return raw_request.decode("UTF-8")
 
     def get_path(self, request):
         req_path = request.splitlines()[0]
@@ -53,7 +66,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler, HTTPServer):
                request.startswith("HEAD ")
 
         if request.startswith("POST "):
-            self.fetch_post_params(conn)
+            self.fetch_post_params(conn, request)
 
         req_path = self.get_path(request)
 
