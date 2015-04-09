@@ -44,14 +44,15 @@ class SMTPClient:
         self.command(base64.b64encode(login.encode()).decode(), False)
         self.command(base64.b64encode(password.encode()).decode())
 
-    def mail_from(self, email):
-        self.command("MAIL FROM:<{}>".format(email))
+    def mail_from(self, address):
+        self.command("MAIL FROM:<{}>".format(address))
 
-    def rcpt_to(self, email):
-        self.command("RCPT TO:<{}>".format(email))
+    def rcpt_to(self, address):
+        self.command("RCPT TO:<{}>".format(address))
 
     def data(self, message):
         self.command("DATA", False)
+        print("Data: " + message)
         self.sock.send(message.encode() + b"\r\n.\r\n")
         self.check_response()
 
@@ -64,7 +65,7 @@ class SMTPClient:
         print("<< " + response)
         code = int(response.partition(' ')[0])
         if check:
-            assert 200 <= code < 300
+            assert 200 <= code < 400
         return code
 
     def quit(self):
@@ -101,7 +102,7 @@ if __name__ == "__main__":
 
     email_subject = input("Subject: ")
     data = input("Enter your message: ")
-    message =smtp.format_message(email_from=email_from, email_to=email_to, subject=email_subject,
+    message = smtp.format_message(email_from=email_from, email_to=email_to, subject=email_subject,
                         cc=email_cc, data=data, bcc=email_bcc)
     smtp.data(message)
     smtp.quit()
