@@ -1,5 +1,6 @@
 import mimetypes
 import multiprocessing
+from threading import Thread
 import time
 
 from nose.tools import assert_equal, raises
@@ -18,16 +19,11 @@ class TestServer:
     def setup_class(self):
         mimetypes.init()
         self.server = start_server()
-        self.t1 = multiprocessing.Process(target=self.server.serve_forever)
+        self.t1 = Thread(target=self.server.serve_forever)
+        self.t1.daemon = True
         self.t1.start()
         while not self.t1.is_alive():
             time.sleep(0.1)
-
-
-    @classmethod
-    def teardown_class(self):
-        # self.server.shutdown()
-        self.t1.terminate()
 
     def test_simple_get(self):
         r = requests.get(self.correct_url)
