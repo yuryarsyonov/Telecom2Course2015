@@ -16,106 +16,132 @@ def start_server():
     server.server_activate()
     return server
 
-class HTTPServer(object):
-    root = "/home/yuryarsyonov/site/"
-    error_msg = "No such file\r\n".encode('UTF-8')
+class Request(object):
+    def __init__(self, conn):
+        self.headers = {}
+        self.conn = conn
+        self.req_text = ""
 
-    def __init__(self):
-        self.conn = None
+    def fetch_post_params(self):
+        assert "Content-Length" in self.headers
+        payload_length = int(self.headers["Content-Length"])
 
-    def header_send(self, line, value):
-        self.conn.sendall("{}: {}\r\n".format(line, value).encode('UTF-8'))
-
-    def fetch_post_params(self, request):
-        payload_length = -1
-        headers = request.splitlines()[1:]
-        for header in headers:
-            if header.startswith("Content-Length"):
-                value = header.partition("Content-Length:")[2]
-                value = value.strip()
-                payload_length = int(value)
-        assert payload_length >= 0
-        payload = request.partition('\r\n\r\n')[2]
+        payload = self.req_text.partition('\r\n\r\n')[2]
         while len(payload) < payload_length:
             new_val = self.conn.recv(1024).decode()
             payload += new_val
         response = ""
         for x in payload.split('&'):
             key, equal, value = x.partition('=')
-            response += (key + " is " + value + "\n")
+            response += (key + " is " + value + ";")
         logging.info(response)
         return response
 
-    def fetch_request(self,):
-        raw_request = bytearray()
+    def fetch_request(self):
+        self.raw_request = bytearray()
+        data = b'tmp'
 
-        while b'\r\n\r\n' not in raw_request:
+        while b'\r\n\r\n' not in self.raw_request:
+            if not data:
+                raise IOError
             data = self.conn.recv(1024)
             logging.info("Received " + data.decode('UTF-8'))
-            raw_request += data
+            self.raw_request += data
 
-        return raw_request.decode("UTF-8")
+        self.req_text = self.raw_request.decode("UTF-8")
 
-    def get_path(self, request):
-        req_path = request.splitlines()[0]
+        raw_headers = self.req_text.splitlines()[1:]
+        for header in raw_headers:
+            key, sep, value = header.partition(":")
+            self.headers[key.strip()] = value.strip()
+
+        logging.info("Request is: \n" + self.req_text)
+
+    def get_req_method(self):
+        return self.req_text.partition(' ')[0]
+
+    def get_path(self):
+        req_path = self.req_text.splitlines()[0]
         req_path = req_path.partition(' ')[2]
         req_path = req_path.rpartition(' ')[0]
 
         return urllib.parse.unquote(req_path)
 
-    def send_response(self, code, message, body,
+class Response(object):
+    def __init__(self):
+        self.headers = {}
+
+    def header_add(self, line, value):
+        self.headers[line] = value
+
+    def form_message(self, code, message, body,
                       content_type="text/plain", content_encoding=None, send_body=True):
-        self.conn.send("HTTP/1.1 {} {}\r\n".format(code, message).encode())
-        self.header_send("Server", "YuryServer")
-        self.header_send("Connection", "close")
+        self.code = code
+        self.message = message
+        self.header_add("Server", "YuryServer")
+        self.header_add("Connection", "close")
         if content_type is not None:
-            self.header_send("Content-Type", content_type)
+            self.header_add("Content-Type", content_type)
         if content_encoding is not None:
-            self.header_send("Content-Encoding", content_encoding)
+            self.header_add("Content-Encoding", content_encoding)
 
-        self.header_send("Content-Length", str(len(body)))
-        self.conn.send(b"\r\n")
+        self.header_add("Content-Length", str(len(body)))
         if send_body:
-            self.conn.send(body)
-
-class MyTCPHandler(socketserver.BaseRequestHandler, HTTPServer):
-    def handle(self):
-        self.conn = self.request
-
-        request = self.fetch_request()
-        logging.info("Request is: \n" + request)
-
-        if not (request.startswith("GET ") or
-                request.startswith("POST ") or
-                request.startswith("HEAD ")):
-            self.send_response(500, "Internal Server Error", "".encode())
-            return
-
-        if request.startswith("POST "):
-            response = self.fetch_post_params(request)
-            self.send_response(200, "OK", response.encode())
-
-        req_path = self.get_path(request)
-
-        logging.info("Path is" + req_path)
-        file_path = self.root + req_path
-
-        file_exists = os.path.isfile(file_path)
-        if not file_exists and file_path.endswith('/'):
-            file_path += 'index.html'
-            file_exists = os.path.isfile(file_path)
-
-        if file_exists:
-            (file_type, encoding) = mimetypes.guess_type(file_path)
-            file_content = open(file_path, mode='rb').read()
-
-            self.send_response(200, "OK", file_content, content_type=file_type,
-                               content_encoding=encoding,
-                               send_body=not request.startswith("HEAD "))
+            self.body = body
         else:
-            self.send_response(404, "Not Found", self.error_msg)
+            self.body = b''
 
-        self.conn.close()
+    def send(self, conn):
+        conn.send("HTTP/1.1 {} {}\r\n".format(self.code, self.message).encode())
+        for key, value in self.headers.items():
+            conn.sendall("{}: {}\r\n".format(key, value).encode())
+        conn.send(b"\r\n")
+        conn.send(self.body)
+
+
+class MyTCPHandler(socketserver.BaseRequestHandler):
+    root = "/home/yuryarsyonov/site/"
+
+    def handle(self):
+        req = Request(self.request)
+        response = Response()
+        try:
+            req.fetch_request()
+
+            if req.get_req_method() not in ["GET", "POST", "HEAD"]:
+                response.form_message(500, "Internal Server Error", b"")
+                response.send(self.request)
+                return
+
+            if req.get_req_method() == "POST":
+                payload = req.fetch_post_params()
+                response.header_add('X-Payload', payload)
+
+            req_path = req.get_path()
+
+            logging.info("Path is" + req_path)
+            file_path = self.root + req_path
+
+            file_exists = os.path.isfile(file_path)
+            if not file_exists and file_path.endswith('/'):
+                file_path += 'index.html'
+                file_exists = os.path.isfile(file_path)
+
+            if file_exists:
+                (file_type, encoding) = mimetypes.guess_type(file_path)
+                file_content = open(file_path, mode='rb').read()
+
+                response.form_message(200, "OK", file_content, content_type=file_type,
+                                   content_encoding=encoding,
+                                   send_body=req.get_req_method() != 'HEAD')
+            else:
+                response.form_message(404, "Not Found", b"No such file\r\n")
+            response.send(self.request)
+        except IOError:
+                response.form_message(500, "Internal Server Error", b"")
+                response.send(self.request)
+
+        self.request.close()
 
 if __name__ == "__main__":
     mimetypes.init()
